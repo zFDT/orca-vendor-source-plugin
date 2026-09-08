@@ -119,6 +119,8 @@ Requires an OrcaSlicer build that includes the script-plugin host (i.e. the Plug
 4. The first write into the system directory triggers OrcaSlicer's **file-access authorization** dialog — please allow it.
 5. **Restart OrcaSlicer**. The new machines now appear in the printer dropdown.
 
+> **About local paths**: the *Git URL* can also be a **local git repository path** (an absolute path or `file://…`) for testing without publishing — but that folder **must be a git repo** (`git init` + `git commit`; no push needed). Every sync re-clones and only sees **committed** content: edit → `git commit` → sync. Plain (non-git) folders are intentionally not a valid source — a git source keeps the content reproducible and traceable. If your goal is just iterating on profile values locally, an OrcaSlicer dev build (which reads `resources/profiles` straight from the source tree) is the more direct workflow.
+
 **Deleting a source automatically rolls back** the vendors it synced: the plugin removes the `<Vendor>.json` / `<Vendor>/` / `.opc` files it installed (you confirm with a second click in the list first). If a vendor is **still used by another source**, deleting one source leaves it in place. Sources added by an older plugin version or never synced have no install record — nothing is rolled back, so clean up `<data dir>/system/` manually in that case. Rolled-back machines disappear from the dropdown **after a restart**.
 
 ---
