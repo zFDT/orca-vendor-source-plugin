@@ -115,13 +115,21 @@ Requires an OrcaSlicer build that includes the script-plugin host (i.e. the Plug
    - *Git URL* — e.g. `https://github.com/<you>/my-machines.git` (HTTPS recommended);
    - *Branch* — e.g. `main`;
    - *Sub-path* — `resources/profiles` by default; change it only if your repo keeps profiles elsewhere (like this repo's `examples/…`, see below).
+   - *Username / access token (password)* — **optional**; only private repos need them (see below).
 3. Click **Sync** (or **Sync all**).
 4. The first write into the system directory triggers OrcaSlicer's **file-access authorization** dialog — please allow it.
 5. **Restart OrcaSlicer**. The new machines now appear in the printer dropdown.
 
 > **About local paths**: the *Git URL* can also be a **local git repository path** (an absolute path or `file://…`) for testing without publishing — but that folder **must be a git repo** (`git init` + `git commit`; no push needed). Every sync re-clones and only sees **committed** content: edit → `git commit` → sync. Plain (non-git) folders are intentionally not a valid source — a git source keeps the content reproducible and traceable. If your goal is just iterating on profile values locally, an OrcaSlicer dev build (which reads `resources/profiles` straight from the source tree) is the more direct workflow.
 
+> **Private repos**: the two optional fields in the add form are the credentials used for cloning —
+> - **HTTPS (GitHub / Gitee)**: put your account name in *Username* and a read-only **personal access token** (fine-grained `Contents: Read`) in the password field. dulwich does not read `~/.git-credentials` and cannot prompt interactively, so the token must be entered here.
+> - **SSH**: write the URL in `ssh://` form, e.g. `ssh://git@github.com/<you>/my-machines.git` (the `git@github.com:…` scp-style is **not supported**). Cloning shells out to the system `ssh`, so your usual `~/.ssh` keys just work.
+> - Credentials are stored in **plain text** next to `sources.json` in the plugin storage directory — use a least-privilege dedicated token and protect that folder.
+
 **Deleting a source automatically rolls back** the vendors it synced: the plugin removes the `<Vendor>.json` / `<Vendor>/` / `.opc` files it installed (you confirm with a second click in the list first). If a vendor is **still used by another source**, deleting one source leaves it in place. Sources added by an older plugin version or never synced have no install record — nothing is rolled back, so clean up `<data dir>/system/` manually in that case. Rolled-back machines disappear from the dropdown **after a restart**.
+
+The manager window language follows the OrcaSlicer UI language (English / 简体中文).
 
 ---
 
@@ -221,7 +229,8 @@ Others add the repo as a source (see [§4](#4-using-the-plugin)), sync, restart 
 - When a synced vendor has the **same name** as a built-in, its `version` must be **higher**, or the built-in may win on the next launch (see [§6](#6-building-your-own-machine-repo)).
 - Deleting a source **automatically rolls back** the vendors it synced (needs a second-click confirm; effective after restart), except sources with no install record (added by an older version / never synced) — see [§4](#4-using-the-plugin).
 - The first write to the system directory triggers a file-access **authorization prompt** — please allow it.
-- Prefer **HTTPS** git URLs. SSH URLs need extra key handling (dulwich's SSH support pulls in more dependencies).
+- Before syncing, the plugin **validates each vendor**: hard problems — unparseable JSON, or manifest-referenced files missing from the repo — skip that vendor with the reason in the log; thumbnail formats the current OrcaSlicer **does not support are automatically stripped from the installed copy** (see the log; the source repo and the main app are untouched), so third-party vendor data still loads.
+- Prefer **HTTPS** git URLs. **SSH** (`ssh://…`) shells out to the system `ssh` client (your usual keys work), but the machine needs `ssh` installed and scp-style URLs are not supported.
 - Syncing a whole official profiles tree overwrites **all** built-in vendors with that branch's versions — point sources at minimal vendor repos unless that is exactly what you want (see [§2](#2-two-ways-to-use-it)).
 
 ---

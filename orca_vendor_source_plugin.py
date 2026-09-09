@@ -6,7 +6,7 @@
 # name = "Vendor Source"
 # description = "Import machine/vendor profiles from git repositories into OrcaSlicer (restart required)."
 # author = "OrcaSlicer Community"
-# version = "0.1.0"
+# version = "0.2.0"
 # ///
 """Vendor Source — 从 git 仓库把「尚未合入主程序的机器资源」合并进本地 OrcaSlicer。
 
@@ -45,12 +45,17 @@ except Exception:  # pragma: no cover - 依赖未装上时的降级提示
 
 DEFAULT_SUB_PATH = "resources/profiles"
 
+# OrcaSlicer 支持的 gcode 缩略图格式（PrintConfig.hpp: enum GCodeThumbnailsFormat）。
+# 不在白名单内的扩展名（如 PNG_TOP_FRONT、厂商自定义 AF_PICK_*）会让
+# handle_legacy_composite 抛异常，导致整个 vendor 加载失败。
+_SUPPORTED_THUMBNAIL_EXTS = {"png", "jpg", "qoi", "btt_tft", "colpic"}
+
 
 # --------------------------------------------------------------------------- #
 # 自包含 HTML 页面：只通过 window.orca 桥与插件通信，主题变量来自宿主。
 # --------------------------------------------------------------------------- #
 PAGE = r"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{html_lang}}">
 <head>
 <meta charset="utf-8">
 <style>
@@ -121,47 +126,52 @@ PAGE = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <h1>Vendor Source — 机器资源源</h1>
-  <p class="muted">从 git 仓库（例如你 fork 的 OrcaSlicer 仓库或某个机型仓库）把尚未合入主程序的机器资源同步到本地。同步完成后需重启 OrcaSlicer。</p>
+  <h1>{{title_h}}</h1>
+  <p class="muted">{{desc}}</p>
 
   <div class="card">
-    <h2>添加资源源</h2>
+    <h2>{{card_add}}</h2>
     <div class="form">
-      <label for="f-name">名称</label>
-      <input id="f-name" placeholder="如 my-fork" />
-      <label for="f-url">Git 仓库 URL</label>
-      <input id="f-url" placeholder="https://github.com/you/OrcaSlicer.git" />
-      <label for="f-branch">分支</label>
+      <label for="f-name">{{name}}</label>
+      <input id="f-name" placeholder="{{ph_name}}" />
+      <label for="f-url">{{url}}</label>
+      <input id="f-url" placeholder="{{ph_url}}" />
+      <label for="f-branch">{{branch}}</label>
       <input id="f-branch" value="main" />
-      <label for="f-sub">子路径</label>
+      <label for="f-sub">{{subpath}}</label>
       <input id="f-sub" value="resources/profiles" />
-      <div class="full"><button id="btn-add">添加</button></div>
+      <label for="f-user">{{username}}</label>
+      <input id="f-user" autocomplete="off" spellcheck="false" />
+      <label for="f-token">{{token}}</label>
+      <input id="f-token" type="password" autocomplete="off" />
+      <div class="full"><button id="btn-add">{{add}}</button></div>
     </div>
   </div>
 
   <div class="card">
-    <h2>已配置的源</h2>
+    <h2>{{card_sources}}</h2>
     <div class="toolbar">
-      <button id="btn-sync-all">全部同步</button>
+      <button id="btn-sync-all">{{sync_all}}</button>
       <span id="hint" class="muted" style="font-size:12px;"></span>
     </div>
     <table>
-      <thead><tr><th>名称</th><th>仓库</th><th>分支</th><th>子路径</th><th></th></tr></thead>
+      <thead><tr><th>{{th_name}}</th><th>{{th_repo}}</th><th>{{th_branch}}</th><th>{{th_sub}}</th><th>{{th_act}}</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <div id="empty" class="empty">还没有配置任何源。</div>
+    <div id="empty" class="empty">{{empty}}</div>
   </div>
 
-  <div id="restart" class="banner">✔ 同步完成。请重启 OrcaSlicer，新机器会出现在打印机下拉框中。</div>
+  <div id="restart" class="banner">{{restart}}</div>
 
   <div class="card">
-    <h2>日志</h2>
+    <h2>{{log_title}}</h2>
     <div id="log" class="log"></div>
   </div>
 
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
+const T = {{js}};
 const esc = s => String(s == null ? '' : s)
   .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -180,8 +190,8 @@ function renderRows(sources) {
       '<td>' + esc(s.branch || 'main') + '</td>' +
       '<td class="mono">' + esc(s.sub_path || 'resources/profiles') + '</td>' +
       '<td class="actions">' +
-        '<button class="small" onclick= remove-btn" data-name="' + esc(s.name) + '" title="删除源并回滚它同步过的厂商（需二次确认）> ' +
-        '<button class="small secondary" onclick="removeOne(\'' + esc(s.name) + '\')">删除</button>' +
+        '<button class="small" data-name="' + esc(s.name) + '" data-act="sync">' + T.sync + '</button> ' +
+        '<button class="small secondary remove-btn" data-name="' + esc(s.name) + '" title="' + T.del_title + '">' + T.del + '</button>' +
       '</td>' +
     '</tr>').join('');
   $('empty').style.display = sources.length ? 'none' : '';
@@ -195,10 +205,14 @@ function addSource() {
     url: $('f-url').value.trim(),
     branch: $('f-branch').value.trim() || 'main',
     sub_path: $('f-sub').value.trim() || 'resources/profiles',
+    username: $('f-user').value.trim(),
+    password: $('f-token').value.trim(),
   };
-  if (!source.name || !source.url) { logLine('⚠ 名称和仓库 URL 不能为空'); return; }
+  if (!source.name || !source.url) { logLine(T.err_required); return; }
   orca.postMessage({ command:'add', source });
-}syncOne(name) { orca.postMessage({ command:'sync', name }); }
+}
+
+function syncOne(name) { orca.postMessage({ command:'sync', name }); }
 function syncAll() { orca.postMessage({ command:'sync_all' }); }
 
 // 删除源会回滚它同步过的厂商文件（破坏性操作），需要二次点击确认。
@@ -207,7 +221,7 @@ function askRemove(btn) {
   if (pendingBtn === btn) {
     clearTimeout(pendingTimer);
     pendingBtn.classList.remove('danger');
-    pendingBtn.textContent = '删除';
+    pendingBtn.textContent = T.del;
     const name = pendingBtn.dataset.name;
     pendingBtn = null;
     orca.postMessage({ command: 'remove', name });
@@ -216,23 +230,26 @@ function askRemove(btn) {
   resetPendingRemove();
   pendingBtn = btn;
   btn.classList.add('danger');
-  btn.textContent = '再次点击确认删除';
+  btn.textContent = T.confirm_del;
   pendingTimer = setTimeout(resetPendingRemove, 3000);
 }
 function resetPendingRemove() {
   if (pendingTimer) clearTimeout(pendingTimer);
   if (pendingBtn && pendingBtn.isConnected) {
     pendingBtn.classList.remove('danger');
-    pendingBtn.textContent = '删除';
+    pendingBtn.textContent = T.del;
   }
   pendingBtn = null;
   pendingTimer = null;
 }
+
+// 列表按钮统一走事件委托：同步 / 删除（删除需二次点击确认）。
 document.addEventListener('click', e => {
-  const btn = e.target.closest('.remove-btn');
-  if (btn) askRemove(btn);
-}); }); }
-function syncAll() { orca.postMessage({ command:'sync_all' }); }
+  const btn = e.target.closest('button[data-name]');
+  if (!btn || !btn.isConnected) return;
+  if (btn.dataset.act === 'sync') syncOne(btn.dataset.name);
+  else if (btn.classList.contains('remove-btn')) askRemove(btn);
+});
 
 $('btn-add').addEventListener('click', addSource);
 $('btn-sync-all').addEventListener('click', syncAll);
@@ -256,6 +273,149 @@ refreshState();
 
 
 # --------------------------------------------------------------------------- #
+# 多语言：UI 跟随 OrcaSlicer 界面语言（zh/en 两套文案）。
+# PAGE 内的 {{key}} 占位符 + JS 里的 {{js}}（JSON 文案对象）都在渲染时替换。
+# --------------------------------------------------------------------------- #
+_UI = {
+    "zh": {
+        "html": {
+            "html_lang": "zh-CN",
+            "title_h": "Vendor Source — 机器资源源",
+            "desc": "从 git 仓库（例如你 fork 的 OrcaSlicer 仓库或某个机型仓库）把尚未合入主程序的机器资源同步到本地。同步完成后需重启 OrcaSlicer。",
+            "card_add": "添加资源源",
+            "name": "名称",
+            "url": "Git 仓库 URL",
+            "branch": "分支",
+            "subpath": "子路径",
+            "username": "用户名（可选）",
+            "token": "访问令牌 / 密码（可选）",
+            "ph_name": "如 my-fork",
+            "ph_url": "https://github.com/you/OrcaSlicer.git",
+            "add": "添加",
+            "card_sources": "已配置的源",
+            "sync_all": "全部同步",
+            "th_name": "名称",
+            "th_repo": "仓库",
+            "th_branch": "分支",
+            "th_sub": "子路径",
+            "th_act": "操作",
+            "empty": "还没有配置任何源。",
+            "restart": "✔ 同步完成。请重启 OrcaSlicer，新机器会出现在打印机下拉框中。",
+            "log_title": "日志",
+        },
+        "js": {
+            "err_required": "⚠ 名称和 Git 仓库 URL 不能为空",
+            "sync": "同步",
+            "del": "删除",
+            "del_title": "删除源并回滚它同步过的厂商（需二次点击确认）",
+            "confirm_del": "再次点击确认删除",
+        },
+        "log": {
+            "added": "已添加源：{name}",
+            "dup": "错误：已存在同名源：{name}",
+            "required": "错误：名称和仓库 URL 不能为空",
+            "removed": "已移除源：{name}",
+            "removed_vendors": "已删除该源同步的厂商（重启后从下拉框消失）：{list}",
+            "kept_vendors": "以下厂商仍被其他源使用，未删除：{list}",
+            "no_install": "该源没有安装记录（旧版本添加或从未同步过）—— 如曾同步，请手动清理 system/ 下的厂商文件",
+            "no_system": "警告：无法定位 system 目录，未删除任何文件",
+            "syncing": "正在同步 {name} …",
+            "synced": "同步完成 {name}：{list}",
+            "err_sync": "同步 {name} 出错：{exc}",
+            "no_sources": "尚未配置任何源",
+            "err_not_found": "错误：找不到源：{name}",
+            "none_vendors": "无厂商",
+            "none_hint": "子路径 \"{path}\" 下没找到可识别的厂商——请核对：分支是否正确、子路径是否直接包含 <Vendor>.json（顶层需含 machine_model_list / process_list / filament_list 之一），而不是多套了一层目录。",
+            "val_skip": "厂商 {name} 数据校验未通过，已跳过安装（问题见上；请修复源仓库后重新同步）",
+            "val_json": "{path}：不是合法 JSON（{err}）",
+            "val_missing": "{path}：厂商清单引用了该文件，但仓库里不存在",
+            "val_thumb": "{path}：不支持的缩略图格式 {ext}（本版本仅支持 PNG/JPG/QOI/BTT_TFT/ColPic）",
+            "val_autofix": "已在安装副本中自动剔除 {n} 个文件里不支持的缩略图格式（源仓库与主程序都未改动）。如需真正支持这些格式，需在主程序 GCodeThumbnailsFormat 中扩展。",
+            "err_prefix": "错误：",
+        },
+    },
+    "en": {
+        "html": {
+            "html_lang": "en",
+            "title_h": "Vendor Source — machine resource sources",
+            "desc": "Pull machine/vendor profiles that are not in your release yet from any git repo (e.g. a fork of OrcaSlicer or a machine repo) and merge them into this local OrcaSlicer. Restart OrcaSlicer after syncing.",
+            "card_add": "Add source",
+            "name": "Name",
+            "url": "Git repo URL",
+            "branch": "Branch",
+            "subpath": "Sub-path",
+            "username": "Username (optional)",
+            "token": "Access token / password (optional)",
+            "ph_name": "e.g. my-fork",
+            "ph_url": "https://github.com/you/OrcaSlicer.git",
+            "add": "Add",
+            "card_sources": "Configured sources",
+            "sync_all": "Sync all",
+            "th_name": "Name",
+            "th_repo": "Repo",
+            "th_branch": "Branch",
+            "th_sub": "Sub-path",
+            "th_act": "Actions",
+            "empty": "No sources configured yet.",
+            "restart": "✔ Sync complete. Restart OrcaSlicer — new machines will appear in the printer dropdown.",
+            "log_title": "Log",
+        },
+        "js": {
+            "err_required": "⚠ Name and Git repo URL are required",
+            "sync": "Sync",
+            "del": "Delete",
+            "del_title": "Delete this source and roll back the vendors it synced (requires a second click)",
+            "confirm_del": "Click again to confirm delete",
+        },
+        "log": {
+            "added": "added source: {name}",
+            "dup": "error: source already exists: {name}",
+            "required": "error: name and url are required",
+            "removed": "removed source: {name}",
+            "removed_vendors": "deleted vendors synced by this source (gone after restart): {list}",
+            "kept_vendors": "vendors still used by other sources, not deleted: {list}",
+            "no_install": "this source has no install record (added by an older version or never synced) — if it ever synced, clean up system/ manually",
+            "no_system": "warning: cannot locate system dir; nothing deleted",
+            "syncing": "syncing {name} ...",
+            "synced": "synced {name}: {list}",
+            "err_sync": "error syncing {name}: {exc}",
+            "no_sources": "no sources configured",
+            "err_not_found": "error: source not found: {name}",
+            "none_vendors": "no vendors",
+            "none_hint": "no recognizable vendor under sub-path \"{path}\" — verify the branch is right and that this sub-path directly contains <Vendor>.json files (top-level keys machine_model_list / process_list / filament_list), not one folder deeper.",
+            "val_skip": "vendor {name} failed validation and was skipped (see problems above; fix the source repo and re-sync)",
+            "val_json": "{path}: not valid JSON ({err})",
+            "val_missing": "{path}: referenced by the vendor manifest but missing from the repo",
+            "val_thumb": "{path}: unsupported thumbnail format {ext} (this version only supports PNG/JPG/QOI/BTT_TFT/ColPic)",
+            "val_autofix": "automatically removed unsupported thumbnail formats from {n} installed file(s) (source repo and main app untouched). Supporting these formats for real requires extending GCodeThumbnailsFormat in the main app.",
+            "err_prefix": "error: ",
+        },
+    },
+}
+
+
+def _detect_lang():
+    """跟随 OrcaSlicer 界面语言；拿不到或非中文就回退英文。"""
+    try:
+        code = orca.host.app_language() or ""
+    except Exception:
+        code = ""
+    return "zh" if code.lower().startswith("zh") else "en"
+
+
+def _render_page(lang):
+    """把 PAGE 模板渲染成指定语言的完整 HTML。"""
+    ui = _UI.get(lang) or _UI["en"]
+    html = PAGE
+    for key, value in ui["html"].items():
+        html = html.replace("{{" + key + "}}", value)
+    html = html.replace("{{js}}", json.dumps(ui["js"], ensure_ascii=False))
+    if "{{" in html:
+        raise RuntimeError("unreplaced page placeholders")
+    return html
+
+
+# --------------------------------------------------------------------------- #
 # 插件能力
 # --------------------------------------------------------------------------- #
 class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
@@ -270,12 +430,13 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
 
         # 在 UI 线程（插件回调）里缓存路径。宿主 API（storage/preset_bundle）
         # 依赖 thread_local 的插件上下文，不能在 worker 线程里调用。
+        self._lang = _detect_lang()
         self._storage = Path(orca.host.plugin.storage())
         self._system = self._locate_system_dir()
 
         self.win = orca.host.ui.create_window(
             title="Vendor Source",
-            html=PAGE,
+            html=_render_page(self._lang),
             width=880,
             height=640,
             on_message=self.on_message,
@@ -302,7 +463,7 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
             elif command == "sync_all":
                 threading.Thread(target=self._sync_all, daemon=True).start()
         except Exception as exc:
-            self._log("error: " + str(exc))
+            self._log(self._t("err_prefix") + str(exc))
 
     # -------------------------------------------------------------- helpers
     def _post(self, obj):
@@ -311,6 +472,12 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
 
     def _log(self, text):
         self._post({"command": "log", "text": text})
+
+    # 取当前语言的日志文案；支持 {name}/{list}/{exc} 占位。
+    def _t(self, key, **kw):
+        table = _UI.get(self._lang, _UI["en"])["log"]
+        text = table.get(key) or _UI["en"]["log"].get(key, key)
+        return text.format(**kw) if kw else text
 
     def _sources_file(self):
         return self._storage / "sources.json"
@@ -334,20 +501,28 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
         name = (source.get("name") or "").strip()
         url = (source.get("url") or "").strip()
         if not name or not url:
-            self._log("error: name and url are required")
+            self._log(self._t("required"))
             return
         sources = self._load_sources()
         if any(s.get("name") == name for s in sources):
-            self._log("error: source already exists: " + name)
+            self._log(self._t("dup", name=name))
             return
-        sources.append({
+        entry = {
             "name": name,
             "url": url,
             "branch": (source.get("branch") or "").strip() or "main",
             "sub_path": (source.get("sub_path") or "").strip() or DEFAULT_SUB_PATH,
-        })
+        }
+        # 私有仓库认证（可选）：username + 访问令牌（GitHub 等平台用 PAT）。
+        user = (source.get("username") or "").strip()
+        password = (source.get("password") or "").strip()
+        if user:
+            entry["username"] = user
+        if password:
+            entry["password"] = password
+        sources.append(entry)
         self._save_sources(sources)
-        self._log("added source: " + name)
+        self._log(self._t("added", name=name))
         self._post_state()
 
     def _remove_source(self, name):
@@ -355,6 +530,14 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
         target = next((s for s in sources if s.get("name") == name), None)
         remaining = [s for s in sources if s.get("name") != name]
         self._save_sources(remaining)
+
+        # 顺带清理该源在 repos/ 下的克隆缓存（已删除的源不再需要）。
+        try:
+            cached = self._storage / "repos" / name
+            if cached.exists():
+                shutil.rmtree(str(cached))
+        except Exception:
+            pass
 
         removed, kept = [], []
         if target is not None and self._system is not None:
@@ -367,15 +550,15 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
                 elif self._uninstall_vendor(vendor):
                     removed.append(vendor)
 
-        self._log("removed source: " + name)
+        self._log(self._t("removed", name=name))
         if removed:
-            self._log("已删除该源同步的厂商（重启后从下拉框消失）: " + ", ".join(removed))
+            self._log(self._t("removed_vendors", list=", ".join(removed)))
         if kept:
-            self._log("以下厂商仍被其他源使用，未删除: " + ", ".join(kept))
+            self._log(self._t("kept_vendors", list=", ".join(kept)))
         if target is not None and not (target.get("installed") or []):
-            self._log("该源没有安装记录（旧版本添加或从未同步过）—— 如曾同步，请手动清理 system/ 下的厂商文件")
+            self._log(self._t("no_install"))
         if self._system is None:
-            self._log("warning: 无法定位 system 目录，未删除任何文件")
+            self._log(self._t("no_system"))
         self._post_state()
 
     # 通过系统 printer preset 的绝对路径反推 data_dir/system
@@ -399,12 +582,25 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
         if target.exists():
             shutil.rmtree(str(target))
         branch = (source.get("branch") or "main").encode("utf-8")
+        # 私有仓库认证（可选）：username + password（GitHub 等平台密码填 PAT）。
+        # dulwich 会把这两个参数透传给 HTTP/SSH 传输层（见 get_transport_and_path）。
+        auth = {}
+        if source.get("username"):
+            auth["username"] = source["username"]
+        if source.get("password"):
+            auth["password"] = source["password"]
         try:
-            porcelain.clone(source=source["url"], target=str(target),
-                            checkout=True, branch=branch)
-        except TypeError:  # 兼容旧版 dulwich 的 str 参数
-            porcelain.clone(source=source["url"], target=str(target),
-                            checkout=True, branch=(source.get("branch") or "main"))
+            cloned = porcelain.clone(source=source["url"], target=str(target),
+                                     checkout=True, branch=branch, **auth)
+        except TypeError:  # 兼容旧版 dulwich：分支改回 str，并去掉认证参数
+            cloned = porcelain.clone(source=source["url"], target=str(target),
+                                     checkout=True, branch=(source.get("branch") or "main"))
+        # 立刻 close 掉 Repo：否则 pack 文件句柄一直占着，Windows 下再次同步时
+        # shutil.rmtree 旧的 repos/<name> 会报 WinError 32（另一个程序正在使用此文件）。
+        try:
+            cloned.close()
+        except Exception:
+            pass
         return target
 
     @staticmethod
@@ -415,6 +611,95 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
                 key in data for key in ("machine_model_list", "process_list", "filament_list"))
         except Exception:
             return False
+
+    def _validate_vendor(self, profiles_dir, vendor):
+        """同步前校验单个厂商。
+
+        返回 (fatal, warnings)：
+          - fatal   结构性硬伤（JSON 不可解析、清单引用缺失）→ 无法安全安装；
+          - warnings 可自动降级的问题（不支持的缩略图格式）→ 安装时自动剔除。
+        """
+        fatal, warnings = [], []
+        vdir = profiles_dir / vendor
+        root = profiles_dir / (vendor + ".json")
+
+        def rel(path):
+            try:
+                return str(Path(path).relative_to(profiles_dir)).replace("\\", "/")
+            except Exception:
+                return str(path)
+
+        def check(path):
+            path = Path(path)
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                fatal.append(self._t("val_json", path=rel(path), err=str(exc)))
+                return None
+            if not isinstance(data, dict):
+                fatal.append(self._t("val_json", path=rel(path), err="top-level is not a JSON object"))
+                return None
+            for spec in data.get("thumbnails") or []:
+                if isinstance(spec, str) and "/" in spec:
+                    ext = spec.rsplit("/", 1)[1].strip().lower()
+                    if ext not in _SUPPORTED_THUMBNAIL_EXTS:
+                        warnings.append(self._t("val_thumb", path=rel(path), ext=spec))
+            return data
+
+        check(root)
+        if vdir.is_dir():
+            # 1) 清单引用的子文件必须存在且可解析
+            root_data = None
+            try:
+                root_data = json.loads(root.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+            if isinstance(root_data, dict):
+                for key in ("machine_model_list", "process_list", "filament_list", "machine_list"):
+                    for item in root_data.get(key) or []:
+                        if isinstance(item, dict) and item.get("sub_path"):
+                            sub = vdir / item["sub_path"]
+                            if not sub.is_file():
+                                fatal.append(self._t("val_missing", path=rel(sub)))
+                            else:
+                                check(sub)
+            # 2) 目录内其余 *.json 也做解析 + 缩略图检查（覆盖未被清单列出、但会被读到的文件）
+            for path in sorted(vdir.rglob("*.json")):
+                check(path)
+        return (list(dict.fromkeys(fatal)), list(dict.fromkeys(warnings)))
+
+    # 把 <Vendor>.json 及 <Vendor>/ 下 JSON 里不受支持的缩略图条目剔除。
+    # 只作用于已安装到 system/ 的副本——源仓库与主程序都不改动。
+    def _sanitize_thumbnails(self, vendor):
+        if self._system is None:
+            return 0
+        paths = [self._system / (vendor + ".json")]
+        vdir = self._system / vendor
+        if vdir.is_dir():
+            paths += sorted(vdir.rglob("*.json"))
+        changed = 0
+        for path in paths:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict) or not isinstance(data.get("thumbnails"), list):
+                continue
+            keep = []
+            for spec in data["thumbnails"]:
+                if not isinstance(spec, str) or "/" not in spec:
+                    keep.append(spec)  # 非 "WxH/EXT" 形式，原样保留
+                    continue
+                if spec.rsplit("/", 1)[1].strip().lower() in _SUPPORTED_THUMBNAIL_EXTS:
+                    keep.append(spec)
+            if keep == data["thumbnails"]:
+                continue
+            if not keep:
+                keep = ["512x512/PNG"]
+            data["thumbnails"] = keep
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            changed += 1
+        return changed
 
     def _install_from_dir(self, profiles_dir):
         profiles_dir = Path(profiles_dir)
@@ -427,6 +712,14 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
             if not self._is_vendor_json(json_file):
                 continue
             vendor = json_file.stem
+            fatal, warnings = self._validate_vendor(profiles_dir, vendor)
+            for warn in warnings:
+                self._log("  ! " + warn)
+            if fatal:
+                for problem in fatal:
+                    self._log("  - " + problem)
+                self._log(self._t("val_skip", name=vendor))
+                continue
             old_opc = self._system / (vendor + ".opc")
             if old_opc.exists():
                 old_opc.unlink()
@@ -437,6 +730,11 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
                 if dst_dir.exists():
                     shutil.rmtree(str(dst_dir))
                 shutil.copytree(str(src_dir), str(dst_dir))
+            # 只影响安装副本：剔除不支持的缩略图格式，避免 OrcaSlicer 整体加载失败
+            if warnings:
+                n = self._sanitize_thumbnails(vendor)
+                if n:
+                    self._log(self._t("val_autofix", n=n))
             copied.append(vendor)
         return copied
 
@@ -450,30 +748,38 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
     def _sync_source(self, name):
         source = next((s for s in self._load_sources() if s.get("name") == name), None)
         if source is None:
-            self._log("error: source not found: " + name)
+            self._log(self._t("err_not_found", name=name))
             return
-        self._log("syncing " + name + " ...")
+        self._log(self._t("syncing", name=name))
         try:
             copied = self._sync_one(source)
             self._record_installed(name, copied)
-            self._log("synced " + name + ": " + (", ".join(copied) or "no vendors"))
+            summary = ", ".join(copied) or self._t("none_vendors")
+            self._log(self._t("synced", name=name, list=summary))
+            if not copied:
+                self._log(self._t("none_hint",
+                                  path=source.get("sub_path") or DEFAULT_SUB_PATH))
         except Exception as exc:
-            self._log("error syncing " + name + ": " + str(exc))
+            self._log(self._t("err_sync", name=name, exc=str(exc)))
         self._post({"command": "done"})
 
     def _sync_all(self):
         sources = self._load_sources()
         if not sources:
-            self._log("no sources configured")
+            self._log(self._t("no_sources"))
             return
         for source in sources:
-            self._log("syncing " + source["name"] + " ...")
+            self._log(self._t("syncing", name=source["name"]))
             try:
                 copied = self._sync_one(source)
                 self._record_installed(source["name"], copied)
-                self._log("synced " + source["name"] + ": " + (", ".join(copied) or "no vendors"))
+                summary = ", ".join(copied) or self._t("none_vendors")
+                self._log(self._t("synced", name=source["name"], list=summary))
+                if not copied:
+                    self._log(self._t("none_hint",
+                                      path=source.get("sub_path") or DEFAULT_SUB_PATH))
             except Exception as exc:
-                self._log("error syncing " + source["name"] + ": " + str(exc))
+                self._log(self._t("err_sync", name=source["name"], exc=str(exc)))
         self._post({"command": "done"})
 
     # 记录某源上次同步安装的 vendor 列表（删除源时用于自动回滚）
