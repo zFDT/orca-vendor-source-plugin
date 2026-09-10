@@ -6,7 +6,7 @@
 # name = "Vendor Source"
 # description = "Import machine/vendor profiles from git repositories into OrcaSlicer (restart required)."
 # author = "OrcaSlicer Community"
-# version = "0.2.0"
+# version = "0.3.0"
 # ///
 """Vendor Source — 从 git 仓库把「尚未合入主程序的机器资源」合并进本地 OrcaSlicer。
 
@@ -21,13 +21,21 @@
   2. 用纯 Python 库 dulwich 拉取 git 仓库到插件私有存储目录；
   3. 把仓库里的 `<Vendor>.json` + `<Vendor>/` 拷贝进 `system/`，
      并先删除同名 `<Vendor>.opc`（避免旧缓存 shadow 新 JSON）；
-  4. 提示用户重启。重启后 `load_system_presets_from_json` 会遍历
+  4. 把 `<Vendor>/` 里的二进制资源（`.stl`/`.svg`/`.png` 等，如床模型、床贴图、
+     喷嘴模型、机型缩略图）镜像到 `<data_dir>/vendor/<Vendor>/`——主程序解析
+     这些资源时优先查该目录（PresetUtils::system_printer_bed_model 等），找不到
+     才回退到应用安装目录的 `resources/profiles/`；只装进 `system/` 是找不到的；
+  5. 提示用户重启。重启后 `load_system_presets_from_json` 会遍历
      `system/` 目录并加载新厂商。
 
-限制（v1）：
+限制：
   - 同步后需要重启 OrcaSlicer 才生效；
   - 只处理 JSON 形式的 vendor（开发树形式），不处理 `.opc` 缓存形式；
-  - 删除源只从列表移除，不会自动回滚已同步的 vendor；
+  - 删除源会自动回滚它同步过的厂商（含资源镜像）；无安装记录（旧版本添加/从未同步）
+    的源无法回滚，需手动清理；
+  - **机器封面图（`*_cover.png`，如侧栏的打印机图片与引导页）主程序目前只从应用自带的
+    `resources/profiles/<厂商>/` 读取（Plater.cpp / WebGuideDialog.cpp 没有数据目录回退），
+    插件无法补齐——需要主程序加回退路径，或把封面放回应用资源目录**；
   - 首次同步写入 system 目录会触发 OrcaSlicer 的文件访问授权弹窗，请允许。
 """
 import json
@@ -331,6 +339,7 @@ _UI = {
             "val_missing": "{path}：厂商清单引用了该文件，但仓库里不存在",
             "val_thumb": "{path}：不支持的缩略图格式 {ext}（本版本仅支持 PNG/JPG/QOI/BTT_TFT/ColPic）",
             "val_autofix": "已在安装副本中自动剔除 {n} 个文件里不支持的缩略图格式（源仓库与主程序都未改动）。如需真正支持这些格式，需在主程序 GCodeThumbnailsFormat 中扩展。",
+            "assets_mirror": "已镜像 {n} 个厂商资源文件（STL/SVG/PNG 等）到数据目录 vendor/，重启后床模型/床贴图、喷嘴模型与机型缩略图可加载（封面图限制见 README）。",
             "err_prefix": "错误：",
         },
     },
@@ -388,6 +397,7 @@ _UI = {
             "val_missing": "{path}: referenced by the vendor manifest but missing from the repo",
             "val_thumb": "{path}: unsupported thumbnail format {ext} (this version only supports PNG/JPG/QOI/BTT_TFT/ColPic)",
             "val_autofix": "automatically removed unsupported thumbnail formats from {n} installed file(s) (source repo and main app untouched). Supporting these formats for real requires extending GCodeThumbnailsFormat in the main app.",
+            "assets_mirror": "mirrored {n} vendor asset file(s) (STL/SVG/PNG...) into the data dir vendor/ folder; bed model/texture, hotend model and machine thumbnails load after a restart (see README for the cover-image limit).",
             "err_prefix": "error: ",
         },
     },
@@ -574,6 +584,46 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
                 return Path(*parts[: idx + 1])
         return None
 
+    # ---------------------------------------------------------- 厂商资源镜像
+    # 主程序（PresetUtils::system_printer_bed_model / bed_texture / hotend_model，
+    # PresetBundle::get_*_for_printer_model，ConfigWizard 的 <机型>_thumbnail.png）
+    # 解析厂商二进制资源时的查找顺序：
+    #   ① <data_dir>/vendor/<厂商>/<文件>   ② <应用>/resources/profiles/<厂商>/<文件>
+    # 插件装的 preset 在 <data_dir>/system/（只被 preset 扫描读取），资源必须镜像
+    # 到 ① 才能被主程序找到；封面（*_cover.png）主程序只查 ②，故镜像也无效。
+    def _vendor_assets_root(self):
+        if self._system is None:
+            return None
+        return self._system.parent / "vendor"
+
+    def _mirror_assets(self, src_dir, vendor):
+        """把 <厂商>/ 里的二进制资源（除 .json/.opc）镜像到 <data_dir>/vendor/<厂商>/。
+
+        与源保持一致：源里没有资源文件（或整体缺失）时删除旧镜像。
+        返回镜像的文件数（失败或无需镜像时 0）。
+        """
+        root = self._vendor_assets_root()
+        if root is None:
+            return 0
+        dst = root / vendor
+        files = []
+        if src_dir.is_dir():
+            files = [p for p in src_dir.rglob("*") if p.is_file()
+                     and p.suffix.lower() not in (".json", ".opc")]
+        try:
+            if dst.exists():
+                shutil.rmtree(str(dst))
+            if files:
+                shutil.copytree(str(src_dir), str(dst),
+                                ignore=shutil.ignore_patterns("*.json", "*.opc"))
+                # 过滤后剩下的空目录（如只装 json 的 machine/）没有意义，清掉
+                for d in sorted(dst.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                    if d.is_dir() and not any(d.iterdir()):
+                        d.rmdir()
+        except Exception:
+            return 0
+        return len(files)
+
     # ------------------------------------------------------ 文件操作（worker 线程）
     def _clone(self, source, workdir):
         if porcelain is None:
@@ -735,6 +785,11 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
                 n = self._sanitize_thumbnails(vendor)
                 if n:
                     self._log(self._t("val_autofix", n=n))
+            # 二进制资源镜像到 data_dir/vendor/：主程序解析床模型/床贴图/喷嘴模型/
+            # 缩略图时优先查该目录（system/ 不在查找链里，见 README「限制」）。
+            n = self._mirror_assets(src_dir, vendor)
+            if n:
+                self._log(self._t("assets_mirror", n=n))
             copied.append(vendor)
         return copied
 
@@ -791,14 +846,19 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
                 break
         self._save_sources(sources)
 
-    # 删除 system/ 下某 vendor 的 .json / .opc / 目录（幂等，返回是否删了东西）
+    # 删除某 vendor 的安装痕迹：system/ 下的 .json / .opc / 目录 + data_dir/vendor/ 资源镜像
+    # （幂等，返回是否删了东西）
     def _uninstall_vendor(self, vendor):
         if self._system is None:
             return False
         removed_any = False
-        for path in (self._system / (vendor + ".json"),
-                     self._system / (vendor + ".opc"),
-                     self._system / vendor):
+        paths = [self._system / (vendor + ".json"),
+                 self._system / (vendor + ".opc"),
+                 self._system / vendor]
+        root = self._vendor_assets_root()
+        if root is not None:
+            paths.append(root / vendor)
+        for path in paths:
             try:
                 if path.is_dir():
                     shutil.rmtree(str(path))

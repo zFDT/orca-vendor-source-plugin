@@ -120,6 +120,8 @@ Requires an OrcaSlicer build that includes the script-plugin host (i.e. the Plug
 4. The first write into the system directory triggers OrcaSlicer's **file-access authorization** dialog — please allow it.
 5. **Restart OrcaSlicer**. The new machines now appear in the printer dropdown.
 
+**What a sync writes**: preset JSONs go to `<data dir>/system/` (where OrcaSlicer scans presets), and the vendor's binary assets (`.stl` / `.svg` / `.png`… — bed model, bed texture, hotend model, per-machine thumbnails) are **mirrored** to `<data dir>/vendor/<Vendor>/`, because that is where the app looks for them **first** (it only falls back to its bundled `resources/profiles/`). A vendor that exists solely as a repo source therefore keeps its bed assets working. Restart OrcaSlicer afterwards.
+
 > **About local paths**: the *Git URL* can also be a **local git repository path** (an absolute path or `file://…`) for testing without publishing — but that folder **must be a git repo** (`git init` + `git commit`; no push needed). Every sync re-clones and only sees **committed** content: edit → `git commit` → sync. Plain (non-git) folders are intentionally not a valid source — a git source keeps the content reproducible and traceable. If your goal is just iterating on profile values locally, an OrcaSlicer dev build (which reads `resources/profiles` straight from the source tree) is the more direct workflow.
 
 > **Private repos**: the two optional fields in the add form are the credentials used for cloning —
@@ -127,7 +129,7 @@ Requires an OrcaSlicer build that includes the script-plugin host (i.e. the Plug
 > - **SSH**: write the URL in `ssh://` form, e.g. `ssh://git@github.com/<you>/my-machines.git` (the `git@github.com:…` scp-style is **not supported**). Cloning shells out to the system `ssh`, so your usual `~/.ssh` keys just work.
 > - Credentials are stored in **plain text** next to `sources.json` in the plugin storage directory — use a least-privilege dedicated token and protect that folder.
 
-**Deleting a source automatically rolls back** the vendors it synced: the plugin removes the `<Vendor>.json` / `<Vendor>/` / `.opc` files it installed (you confirm with a second click in the list first). If a vendor is **still used by another source**, deleting one source leaves it in place. Sources added by an older plugin version or never synced have no install record — nothing is rolled back, so clean up `<data dir>/system/` manually in that case. Rolled-back machines disappear from the dropdown **after a restart**.
+**Deleting a source automatically rolls back** the vendors it synced: the plugin removes the `<Vendor>.json` / `<Vendor>/` / `.opc` files it installed, plus the mirrored `<data dir>/vendor/<Vendor>/` assets (you confirm with a second click in the list first). If a vendor is **still used by another source**, deleting one source leaves it in place. Sources added by an older plugin version or never synced have no install record — nothing is rolled back, so clean up `<data dir>/system/` manually in that case. Rolled-back machines disappear from the dropdown **after a restart**.
 
 The manager window language follows the OrcaSlicer UI language (English / 简体中文).
 
@@ -230,6 +232,7 @@ Others add the repo as a source (see [§4](#4-using-the-plugin)), sync, restart 
 - Deleting a source **automatically rolls back** the vendors it synced (needs a second-click confirm; effective after restart), except sources with no install record (added by an older version / never synced) — see [§4](#4-using-the-plugin).
 - The first write to the system directory triggers a file-access **authorization prompt** — please allow it.
 - Before syncing, the plugin **validates each vendor**: hard problems — unparseable JSON, or manifest-referenced files missing from the repo — skip that vendor with the reason in the log; thumbnail formats the current OrcaSlicer **does not support are automatically stripped from the installed copy** (see the log; the source repo and the main app are untouched), so third-party vendor data still loads.
+- **Machine cover images** (`*_cover.png` — the printer picture in the sidebar and the guide page) are read **only** from the app's own `resources/profiles/<Vendor>/` today (`Plater.cpp` / `WebGuideDialog.cpp`, no data-dir fallback), so a vendor installed purely from a repo source shows a placeholder picture. Fixing that needs a small main-app change (add a `<data dir>/vendor/<Vendor>/` fallback); the plugin itself cannot supply covers.
 - Prefer **HTTPS** git URLs. **SSH** (`ssh://…`) shells out to the system `ssh` client (your usual keys work), but the machine needs `ssh` installed and scp-style URLs are not supported.
 - Syncing a whole official profiles tree overwrites **all** built-in vendors with that branch's versions — point sources at minimal vendor repos unless that is exactly what you want (see [§2](#2-two-ways-to-use-it)).
 
