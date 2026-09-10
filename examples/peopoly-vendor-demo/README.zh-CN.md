@@ -18,6 +18,8 @@ peopoly-vendor-demo/
 
 该厂商数据**原样复制**自**公开**的 OrcaSlicer 官方仓库（`resources/profiles/Peopoly.json` + `Peopoly/`，AGPL-3.0）——可作为真实厂商结构的案例分析，不含任何专有数据。
 
+除 profile JSON 外，该厂商还带二进制资源——床模型（`magnetox_model*.stl`）、床贴图（`magnetox_model*_texture.svg`）与机器封面（`Peopoly Magneto X_cover.png`）。同步时插件会把它们镜像到应用数据目录的 `vendor/Peopoly/` 下（主程序解析床模型/贴图的优先位置；封面图仍受主程序读取位置限制，见顶层 README）。
+
 ## 如何试跑
 
 **方式 A——把本仓库自身作为源**
