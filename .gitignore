@@ -4,6 +4,11 @@ __pycache__/
 .venv/
 venv/
 
+# setuptools side effects of `python -m build` (dist/ is committed on purpose:
+# it holds the current wheel, see README §3)
+build/
+*.egg-info/
+
 # OS
 .DS_Store
 Thumbs.db

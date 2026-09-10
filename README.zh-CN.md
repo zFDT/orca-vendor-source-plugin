@@ -94,14 +94,33 @@ my-machines/                 # 任意仓库名
 
 ## 3. 安装插件
 
+插件提供**两种等价形式**，二选一安装，**不要同时装**：
+
+| 形式 | 文件 | 说明 |
+|---|---|---|
+| Wheel | `dist/orca_vendor_source_plugin-<version>-py3-none-any.whl`（[目录](dist)） | 便于分发的构建产物：名称/版本/描述/依赖都来自 wheel，安装前宿主会校验包格式 |
+| 单文件 | [`orca_vendor_source_plugin.py`](orca_vendor_source_plugin.py) | 源码形式：一个可读文件，无需打包 |
+
+两者包含完全相同的模块、注册同一个 **Vendor Source** 能力；同时安装会加载两个插件并争用同一个 Python 模块名，请先删掉其中一个（删除 `<数据目录>/orca_plugins/` 下对应的文件夹）。
+
 1. 打开 OrcaSlicer，进入「插件」对话框（顶部菜单 **Plugins** 或 **File → Plugins**）。
-2. 选择「从文件安装」，选中本仓库的 `orca_vendor_source_plugin.py`。
-3. 安装完成后，在插件列表里找到 **Vendor Source**，启用它的 Script 能力。
+2. 打开 **Browse plugins** 下拉菜单，选择 **Install local plugin**，选中 `.whl`（或 `.py`）。
+3. 在插件列表里找到该插件（**Vendor Source**），启用它的 Script 能力。
 4. 在 **Speed Dial**（主界面快捷入口）里会出现 **Vendor Source** 动作，点击即可打开管理窗口。
 
 > 首次加载时，OrcaSlicer 会用内置的 `uv` 自动安装唯一依赖 `dulwich`，需要联网，稍等几秒即可。
 
-**分发插件**：用户只需要 `orca_vendor_source_plugin.py` 这一个文件。若要把本仓库托管到自己名下：`git init && git add -A && git commit -m "…"` 后推送到 GitHub / Gitee 即可——请保留 `examples/`，它可以当作现成的演示（见 [§5](#5-真实示例examples-里的完整机型仓库)）。
+**分发插件**：直接给对方 `.whl` 即可——单个约 20 KB，对方无需任何构建步骤；它已提交在 `dist/` 下，且每次推送 `v*` 标签，CI 都会自动构建并挂到 [Releases](https://github.com/zFDT/orca-vendor-source-plugin/releases) 页面，用下载链接分发也行。对方只需 **Install local plugin** 选中它。
+
+**重新打包**（wheel 是构建产物，不要直接改它）：
+
+```bash
+python -m pip install --upgrade build
+python -m build --wheel                   # → dist/orca_vendor_source_plugin-<version>-py3-none-any.whl
+python tools/verify_wheel.py dist/*.whl   # 与宿主同样的校验 + 桩模块加载测试
+```
+
+`pyproject.toml` 通过 `py-modules` 直接指向现有的 `orca_vendor_source_plugin.py`，因此该单文件始终是**唯一**事实来源，wheel 不复制任何代码。改版本号时要**同时**改两处（`pyproject.toml` 与 `.py` 顶部 PEP 723 的 `# version =`）；两者不一致时 `tools/verify_wheel.py`（以及 CI）会报错。
 
 需要带脚本插件宿主（即带 Plugins 对话框）的 OrcaSlicer 版本。
 
@@ -242,12 +261,19 @@ git push -u origin main
 
 ```text
 orca-vendor-source-plugin/
-├── orca_vendor_source_plugin.py      # 插件本体（用户唯一需要的运行时文件）
-├── README.md                         # 英文说明（GitHub 默认展示）
-├── README.zh-CN.md                   # 本文件（简体中文）
+├── orca_vendor_source_plugin.py       # 插件本体——唯一事实来源（同时也是单文件分发形式）
+├── pyproject.toml                     # wheel 打包配置；setuptools 直接指向上面的 .py
+├── dist/
+│   └── orca_vendor_source_plugin-<version>-py3-none-any.whl  # 预构建 wheel（与 .py 代码完全相同，可直接安装）
+├── tools/
+│   └── verify_wheel.py                # 按宿主规则校验 wheel（CI 里也会跑）
+├── .github/
+│   └── workflows/build-wheel.yml      # 推送/PR 时构建+校验；打 v* 标签时把 wheel 挂到 Release
+├── README.md                          # 英文说明（GitHub 默认展示）
+├── README.zh-CN.md                    # 本文件（简体中文）
 ├── examples/
-│   └── peopoly-vendor-demo/          # 公开的完整小厂商（Peopoly），可运行示例
-│       └── resources/profiles/       #   → 把源指向这里
+│   └── peopoly-vendor-demo/           # 公开的完整小厂商（Peopoly），可运行示例
+│       └── resources/profiles/        #   → 把源指向这里
 │           ├── Peopoly.json
 │           └── Peopoly/
 └── .gitignore

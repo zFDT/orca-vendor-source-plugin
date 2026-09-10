@@ -94,14 +94,33 @@ Point a source at it and sync — now only *your* vendor is ever touched, built-
 
 ## 3. Install the plugin
 
+The plugin comes in **two equivalent forms** — install **one** of them, never both:
+
+| Form | File | Notes |
+|---|---|---|
+| Wheel | `dist/orca_vendor_source_plugin-<version>-py3-none-any.whl` ([directory](dist)) | the shareable build: the host reads name / version / description / dependencies from the wheel and verifies the package before installing |
+| Single file | [`orca_vendor_source_plugin.py`](orca_vendor_source_plugin.py) | the source form: one readable file, no build step |
+
+Both ship the identical module and register the same **Vendor Source** capability. Installing both would load two plugins that fight over the same Python module name — remove one first (delete its folder under `<data dir>/orca_plugins/`).
+
 1. Start OrcaSlicer and open the **Plugins** dialog (top menu **Plugins**, or **File → Plugins**).
-2. Choose **Install from file** and pick `orca_vendor_source_plugin.py` from this repo.
-3. Find **Vendor Source** in the plugin list and enable its **Script** capability.
+2. Open the **Browse plugins** split menu and choose **Install local plugin**, then pick the `.whl` or the `.py`.
+3. Find the plugin in the list (**Vendor Source**) and enable its **Script** capability.
 4. A **Vendor Source** action now appears in the **Speed Dial**; click it to open the manager window.
 
 > On first load, OrcaSlicer auto-installs the only dependency (`dulwich`) using its bundled `uv` — this needs network and takes a few seconds.
 
-**Sharing the plugin**: users only ever need that single `orca_vendor_source_plugin.py` file. To host this repo yourself, `git init && git add -A && git commit -m "…"` and push to GitHub / Gitee — keep `examples/`, it doubles as a live demo (see [§5](#5-worked-example--a-real-vendor-repo-examples)).
+**Sharing the plugin**: hand out the `.whl` — a single ~20 KB file, no build step for the recipient. It is already committed under `dist/`, and every `v*` tag is built by CI and attached to the [Releases](https://github.com/zFDT/orca-vendor-source-plugin/releases) page, so a plain download link works too. The recipient only needs **Install local plugin**.
+
+**Rebuilding the wheel** (the wheel is a build product — never edit it in place):
+
+```bash
+python -m pip install --upgrade build
+python -m build --wheel                   # → dist/orca_vendor_source_plugin-<version>-py3-none-any.whl
+python tools/verify_wheel.py dist/*.whl   # exactly what the host checks, plus a stubbed load
+```
+
+`pyproject.toml` points setuptools at the existing `orca_vendor_source_plugin.py` (`py-modules`), so that single file stays the **only** source of truth — nothing is duplicated for the wheel. When you bump the version, update it in **both** places (`pyproject.toml` and the PEP 723 `# version =` line at the top of the `.py`); `tools/verify_wheel.py` (and CI) fail if they diverge.
 
 Requires an OrcaSlicer build that includes the script-plugin host (i.e. the Plugins dialog).
 
@@ -242,12 +261,19 @@ Others add the repo as a source (see [§4](#4-using-the-plugin)), sync, restart 
 
 ```text
 orca-vendor-source-plugin/
-├── orca_vendor_source_plugin.py      # the plugin (the only runtime file users need)
-├── README.md                         # this file (English)
-├── README.zh-CN.md                   # 简体中文版
+├── orca_vendor_source_plugin.py       # the plugin — single source of truth (also the one-file distribution)
+├── pyproject.toml                     # wheel packaging; points setuptools at the .py above
+├── dist/
+│   └── orca_vendor_source_plugin-<version>-py3-none-any.whl  # prebuilt wheel (identical code, ready to install)
+├── tools/
+│   └── verify_wheel.py                # checks a built wheel the way the host does (run in CI)
+├── .github/
+│   └── workflows/build-wheel.yml      # build + verify on push/PR; attach the wheel to a v* release
+├── README.md                          # this file (English)
+├── README.zh-CN.md                    # 简体中文版
 ├── examples/
-│   └── peopoly-vendor-demo/         # complete public vendor (Peopoly), runnable example
-│       └── resources/profiles/      #   → point a source here
+│   └── peopoly-vendor-demo/           # complete public vendor (Peopoly), runnable example
+│       └── resources/profiles/        #   → point a source here
 │           ├── Peopoly.json
 │           └── Peopoly/
 └── .gitignore

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orca-vendor-source-plugin"
+version = "0.3.0"
+description = "Import machine/vendor profiles from git repositories into OrcaSlicer (restart required)."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "OrcaSlicer Community" }]
+dependencies = ["dulwich>=0.21.7"]
+
+[project.urls]
+Homepage = "https://github.com/zFDT/orca-vendor-source-plugin"
+
+# The wheel ships the existing single-file plugin as a top-level module:
+# OrcaSlicer extracts the wheel to __whl_extracted__/<entry>/ and imports <entry>,
+# where <entry> resolves to `top_level.txt` (or the normalized project name,
+# which is also `orca_vendor_source_plugin`). No code is duplicated.
+[tool.setuptools]
+py-modules = ["orca_vendor_source_plugin"]

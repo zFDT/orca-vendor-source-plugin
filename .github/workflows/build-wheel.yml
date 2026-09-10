@@ -1,0 +1,43 @@
+name: Build wheel
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only needed to attach the wheel to a GitHub release on tag pushes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel
+
+      # Same rules the host enforces (PluginFsUtils.cpp / PluginLoader.cpp),
+      # plus a stubbed `import` of the entry package: fails here, not in the UI.
+      - name: Verify the wheel
+        run: python tools/verify_wheel.py dist/*.whl
+
+      - name: Upload the wheel as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-vendor-source-plugin-wheel
+          path: dist/*.whl
+
+      - name: Attach the wheel to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
+          generate_release_notes: true
