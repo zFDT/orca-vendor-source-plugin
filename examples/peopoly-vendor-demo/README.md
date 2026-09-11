@@ -23,9 +23,8 @@ a real vendor is structured, with no proprietary data.
 Besides the profile JSONs, the vendor ships its binary assets — bed models
 (`magnetox_model*.stl`), bed textures (`magnetox_model*_texture.svg`) and the machine
 cover (`Peopoly Magneto X_cover.png`). On sync the plugin mirrors these into the app
-data directory's `vendor/Peopoly/` folder, where the app looks for the bed
-model/texture first (the cover image is still subject to the main-app read-path
-limit, see the top-level README).
+data directory's `vendor/Peopoly/` folder, which the app consults first for the bed
+model/texture and the cover alike (see the top-level README).
 
 ## How to try it
 

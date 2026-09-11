@@ -33,11 +33,10 @@
   - 只处理 JSON 形式的 vendor（开发树形式），不处理 `.opc` 缓存形式；
   - 删除源会自动回滚它同步过的厂商（含资源镜像）；无安装记录（旧版本添加/从未同步）
     的源无法回滚，需手动清理；
-  - **机器封面图（`*_cover.png`，如侧栏的打印机图片与引导页）主程序目前只从应用自带的
-    `resources/profiles/<厂商>/` 读取（Plater.cpp / WebGuideDialog.cpp 没有数据目录回退），
-    插件无法补齐。这是主程序侧的能力缺口：本插件保持独立、只写应用数据目录；如需支持，
-    应由主程序整体实现（数据目录安装的厂商与内置厂商走同一套资源解析），而不是采用
-    「插件 + 主程序补丁」的混合方案**；
+  - **机器封面图（`*_cover.png`，如侧栏的打印机图片与引导页）主程序原先只从应用自带的
+    `resources/profiles/<厂商>/` 读取，插件无法补齐；现在主程序已统一走
+    `PresetUtils::vendor_asset_path()`（数据目录镜像优先、应用资源兜底），插件把封面
+    镜像进 `<data_dir>/vendor/<厂商>/` 后即可被解析**；
   - 首次同步写入 system 目录会触发 OrcaSlicer 的文件访问授权弹窗，请允许。
 """
 import json
@@ -341,7 +340,7 @@ _UI = {
             "val_missing": "{path}：厂商清单引用了该文件，但仓库里不存在",
             "val_thumb": "{path}：不支持的缩略图格式 {ext}（本版本仅支持 PNG/JPG/QOI/BTT_TFT/ColPic）",
             "val_autofix": "已在安装副本中自动剔除 {n} 个文件里不支持的缩略图格式（源仓库与主程序都未改动）。如需真正支持这些格式，需在主程序 GCodeThumbnailsFormat 中扩展。",
-            "assets_mirror": "已镜像 {n} 个厂商资源文件（STL/SVG/PNG 等）到数据目录 vendor/，重启后床模型/床贴图、喷嘴模型与机型缩略图可加载（封面图限制见 README）。",
+            "assets_mirror": "已镜像 {n} 个厂商资源文件（STL/SVG/PNG 等，含机型封面）到数据目录 vendor/，重启后床模型/床贴图、喷嘴模型、机型缩略图与封面可加载。",
             "err_prefix": "错误：",
         },
     },
@@ -399,7 +398,7 @@ _UI = {
             "val_missing": "{path}: referenced by the vendor manifest but missing from the repo",
             "val_thumb": "{path}: unsupported thumbnail format {ext} (this version only supports PNG/JPG/QOI/BTT_TFT/ColPic)",
             "val_autofix": "automatically removed unsupported thumbnail formats from {n} installed file(s) (source repo and main app untouched). Supporting these formats for real requires extending GCodeThumbnailsFormat in the main app.",
-            "assets_mirror": "mirrored {n} vendor asset file(s) (STL/SVG/PNG...) into the data dir vendor/ folder; bed model/texture, hotend model and machine thumbnails load after a restart (see README for the cover-image limit).",
+            "assets_mirror": "mirrored {n} vendor asset file(s) (STL/SVG/PNG..., covers included) into the data dir vendor/ folder; bed model/texture, hotend model, machine thumbnails and covers load after a restart.",
             "err_prefix": "error: ",
         },
     },
@@ -592,7 +591,8 @@ class VendorSourcePanel(orca.script.ScriptPluginCapabilityBase):
     # 解析厂商二进制资源时的查找顺序：
     #   ① <data_dir>/vendor/<厂商>/<文件>   ② <应用>/resources/profiles/<厂商>/<文件>
     # 插件装的 preset 在 <data_dir>/system/（只被 preset 扫描读取），资源必须镜像
-    # 到 ① 才能被主程序找到；封面（*_cover.png）主程序只查 ②，故镜像也无效。
+    # 到 ① 才能被主程序找到；封面（*_cover.png）同样走 ①，主程序统一用
+    # PresetUtils::vendor_asset_path() 解析（数据目录镜像优先、应用资源兜底）。
     def _vendor_assets_root(self):
         if self._system is None:
             return None
