@@ -278,3 +278,21 @@ orca-vendor-source-plugin/
 │           └── Peopoly/
 └── .gitignore
 ```
+
+## 技术特色与复盘
+
+### 技术亮点
+
+- **纯 Python、零系统依赖**：拉取 git 仓库用的是纯 Python 库 [dulwich](https://github.com/jelmer/dulwich)，不依赖系统 `git`，也因此天然支持 HTTPS 认证、SSH（`ssh://`）与本地仓库路径三种源，插件可分发给任意 OrcaSlicer 用户「即装即用」。
+- **零侵入式插件设计**：整个插件只调用宿主已暴露的**只读 API**（`preset_bundle()`、`plugin.storage()`、`ui.create_window()`），对 OrcaSlicer 主程序**零改动**；vendor 合并全部发生在用户数据目录（`<data dir>/system/`、`<data dir>/vendor/`），不 patch 应用本身、不影响升级。
+- **面向真实开源 issue 的解决方案**：直接回应 [OrcaSlicer issue #15505](https://github.com/OrcaSlicer/OrcaSlicer/issues/15505)（新机型已合入 main/dev、稳定版未发布），把「等稳定版 / 上 nightly」两难，收敛成一个「配置 git 源 → 同步 → 重启」的通用工作流。
+- **工程细节完备**：vendor 二进制资源（`.stl`/`.svg`/`.png` 床模型、封面图）走与主应用一致的 `vendor_asset_path()` 解析链自动镜像；删除源时按安装记录**自动回滚**、跨源共享 vendor 去重；wheel 与单文件两种发布形态共用同一份源码，CI 校验版本一致。
+
+### 个人贡献
+
+- 独立设计并实现整个插件：从定位 issue、梳理 OrcaSlicer 的 vendor 加载与资产解析机制，到确定「纯 Python + 只读 API + 用户空间合并」的方案，再到源码、wheel 打包、CI、双语文档（英文 + 简体中文）与可运行的 worked example，全部一人完成。
+
+### 收获与规划
+
+- **收获**：系统性地读懂了大型开源项目（OrcaSlicer，C++ 主程序 + 脚本插件宿主）的配置加载与资产解析链路，验证了「在不改宿主的前提下，用其暴露的扩展点做零侵入功能增强」的可行路径——这是一套可迁移到其他大型桌面应用插件化场景的方法论。
+- **规划**：后续可补充「增量更新 / 指定单台机型拉取」以避免整树同步，增加配置导入导出与多源版本冲突提示，并把「零侵入插件」经验沉淀为通用模板。
